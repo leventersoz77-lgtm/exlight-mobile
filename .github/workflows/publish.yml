@@ -1,0 +1,57 @@
+name: Publish latest EXLIGHT mobile app
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout publisher
+        uses: actions/checkout@v4
+
+      - name: Download latest verified EXLIGHT web package
+        shell: pwsh
+        env:
+          SUPABASE_URL: https://adqmmkzagkxnkfwfhmws.supabase.co
+          SUPABASE_PUBLISHABLE_KEY: sb_publishable_s4Z68YBp4C4B54rITdB-eg_9FZQWVIY
+        run: |
+          $headers = @{
+            apikey = $env:SUPABASE_PUBLISHABLE_KEY
+            Authorization = "Bearer $env:SUPABASE_PUBLISHABLE_KEY"
+          }
+          $query = "$env:SUPABASE_URL/rest/v1/app_versions?platform=eq.web&channel=eq.stable&select=version,build_number&order=build_number.desc&limit=1"
+          $latest = Invoke-RestMethod -Headers $headers -Uri $query
+          if (!$latest -or !$latest[0].version) { throw 'Güncel EXLIGHT web sürümü bulunamadı.' }
+          $version = $latest[0].version
+          $packageUrl = "$env:SUPABASE_URL/storage/v1/object/public/app-releases/EXLIGHT-Web-$version.zip"
+          Invoke-WebRequest -Uri $packageUrl -OutFile exlight-web.zip
+          New-Item -ItemType Directory -Force -Path site | Out-Null
+          Expand-Archive -Path exlight-web.zip -DestinationPath site -Force
+          if (!(Test-Path site/index.html)) { throw 'EXLIGHT web paketinde index.html bulunamadı.' }
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload EXLIGHT mobile site
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+      - name: Deploy EXLIGHT mobile site
+        id: deployment
+        uses: actions/deploy-pages@v4
